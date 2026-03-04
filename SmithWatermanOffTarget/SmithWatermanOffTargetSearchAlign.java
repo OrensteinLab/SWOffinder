@@ -41,7 +41,32 @@ public class SmithWatermanOffTargetSearchAlign {
     private static int MAX_BULGES = 1;
     private static int EFFECTIVE_MAX_EDIT_WITH_BULGE = Math.min(MAX_EDITS, MAX_MISMATCHES_WITH_BULGES + MAX_BULGES);
     private static boolean ALLOW_PAM_EDITS = false;
+    // 4-bit masks: A=0001, C=0010, G=0100, T=1000
+    private static final byte[] MASK = buildMask();
 
+    private static byte[] buildMask() {
+        byte[] m = new byte[128];
+        m['A'] = 0b00000001;  // A
+        m['C'] = 0b00000010;  // C
+        m['G'] = 0b00000100;  // G
+        m['T'] = 0b00001000;  // T
+        m['R'] = 0b00000101;  // A|G  (puRine)
+        m['Y'] = 0b00001010;  // C|T  (pYrimidine)
+        m['S'] = 0b00000110;  // C|G  (Strong)
+        m['W'] = 0b00001001;  // A|T  (Weak)
+        m['K'] = 0b00001100;  // G|T  (Keto)
+        m['M'] = 0b00000011;  // A|C  (aMino)
+        m['B'] = 0b00001110;  // C|G|T (not A)
+        m['D'] = 0b00001101;  // A|G|T (not C)
+        m['H'] = 0b00001011;  // A|C|T (not G)
+        m['V'] = 0b00000111;  // A|C|G (not T)
+        m['N'] = 0b00001111;  // any
+        return m;
+    }
+
+    private static boolean iupacMatches(char iupac, char base) {
+        return (MASK[iupac] & MASK[base]) != 0;
+    }
 
     public static void setNumThreads(int value) {
         NUM_THREADS = value;
@@ -108,12 +133,10 @@ public class SmithWatermanOffTargetSearchAlign {
         targetTextAlignMissOrMatch[1].append(text.charAt(text_i - 1));
         int mismatchSocre;
         if (allowNsInText) {
-            mismatchSocre = (target.charAt(target_i - 1) != text.charAt(text_i - 1) &&
-                                 target.charAt(target_i - 1) != 'N' && text.charAt(text_i - 1) != 'N') ? 1 : 0;
+            mismatchSocre = !iupacMatches(target.charAt(target_i - 1), text.charAt(text_i - 1)) ? 1 : 0;
         }
         else {
-            mismatchSocre = (target.charAt(target_i - 1) != text.charAt(text_i - 1) &&
-                                 target.charAt(target_i - 1) != 'N') ? 1 : 0;
+            mismatchSocre = (text.charAt(text_i - 1) == 'N' || !iupacMatches(target.charAt(target_i - 1), text.charAt(text_i - 1))) ? 1 : 0;
         }
         if (!ALLOW_PAM_EDITS) {
             if  (((strand == "+") && (target_i <= targetLen &&  targetLen - pam.length() < target_i)) ||
@@ -230,17 +253,15 @@ public class SmithWatermanOffTargetSearchAlign {
         int textBulgeCell = M[row][col - 1];
         if (allowNsInText) {
             M[row][col] = Math.min(Math.min(
-                (target.charAt(row - 1) != text.charAt(col - 1) &&
-                 target.charAt(row - 1) != 'N' &&
-                 text.charAt(col - 1) != 'N') ? matchCell + 1 : matchCell,
-                 targetBulgeCell + 1), textBulgeCell + 1
+                !iupacMatches(target.charAt(row - 1), text.charAt(col - 1)) ? matchCell + 1 : matchCell,
+                targetBulgeCell + 1), textBulgeCell + 1
                 );
         }
         else {
             M[row][col] = Math.min(Math.min(
-                (target.charAt(row - 1) != text.charAt(col - 1) &&
-                 target.charAt(row - 1) != 'N') ? matchCell + 1 : matchCell,
-                 targetBulgeCell + 1), textBulgeCell + 1
+                (text.charAt(col - 1) == 'N' ||
+                !iupacMatches(target.charAt(row - 1), text.charAt(col - 1))) ? matchCell + 1 : matchCell,
+                targetBulgeCell + 1), textBulgeCell + 1
                 );
         }
     }
@@ -407,72 +428,43 @@ public class SmithWatermanOffTargetSearchAlign {
         return files;
     }
 
+    private static char complementChar(char c) {
+        switch (c) {
+            case 'A': return 'T';
+            case 'C': return 'G';
+            case 'G': return 'C';
+            case 'T': return 'A';
+            case 'N': return 'N';
+            case '-': return '-';
+            case 'R': return 'Y';
+            case 'Y': return 'R';
+            case 'S': return 'S';
+            case 'W': return 'W';
+            case 'K': return 'M';
+            case 'M': return 'K';
+            case 'B': return 'V';
+            case 'D': return 'H';
+            case 'H': return 'D';
+            case 'V': return 'B';
+            default:  return c;
+        }
+    }
+            
     public static String reverseComplement(String seq) {
         StringBuilder rcSeq = new StringBuilder();
-    
         for (int i = seq.length() - 1; i >= 0; i--) {
-            char c = seq.charAt(i);
-    
-            switch (c) {
-                case 'A':
-                    rcSeq.append('T');
-                    break;
-                case 'C':
-                    rcSeq.append('G');
-                    break;
-                case 'G':
-                    rcSeq.append('C');
-                    break;
-                case 'T':
-                    rcSeq.append('A');
-                    break;
-                case 'N':
-                    rcSeq.append('N');
-                    break;
-                case '-':
-                    rcSeq.append('-');
-                    break;
-                default:
-                    break;
-            }
+            rcSeq.append(complementChar(seq.charAt(i)));
         }
-    
         return rcSeq.toString();
     }
 
     public static String complement(String seq) {
         StringBuilder cSeq = new StringBuilder();
-    
         for (int i = 0; i < seq.length(); i++) {
-            char c = seq.charAt(i);
-    
-            switch (c) {
-                case 'A':
-                    cSeq.append('T');
-                    break;
-                case 'C':
-                    cSeq.append('G');
-                    break;
-                case 'G':
-                    cSeq.append('C');
-                    break;
-                case 'T':
-                    cSeq.append('A');
-                    break;
-                case 'N':
-                    cSeq.append('N');
-                    break;
-                case '-':
-                    cSeq.append('-');
-                    break;
-                default:
-                    break;
-            }
+            cSeq.append(complementChar(seq.charAt(i)));
         }
-
         return cSeq.toString();
     }
-
 
     public static class SmithWatermanProcessFileHandler implements Runnable {
         private FileWriter writer;
@@ -486,7 +478,6 @@ public class SmithWatermanOffTargetSearchAlign {
         private Boolean chooseBestInWindow;
         private long positionShift;
         private String chr;
-        
         
         public SmithWatermanProcessFileHandler(
             FileWriter writer, String text, String lastText, int targetLen, Map<String, String> strandToTarget, Map<String, String> strandToPam,
@@ -654,7 +645,7 @@ public class SmithWatermanOffTargetSearchAlign {
                 String rcTarget = reverseComplement(target);
                 // This is import factor as it define the memory the program consumes
                 // In addition, we are limited by the size of the array which function of this size
-                int bufferSize = 10000;
+                int bufferSize = 100000;
 
                 Map<String, String> strandToTarget = new HashMap<>();
                 strandToTarget.put("+", target);
