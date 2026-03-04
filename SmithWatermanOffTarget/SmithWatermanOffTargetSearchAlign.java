@@ -586,7 +586,7 @@ public class SmithWatermanOffTargetSearchAlign {
             in.close();
             executorService.shutdown();
     }
-    
+
     private static boolean targetContainsPam(String target, String pam) {
         if (target.length() < pam.length()) return false;
         int offset = target.length() - pam.length();
@@ -596,36 +596,84 @@ public class SmithWatermanOffTargetSearchAlign {
         return true;
     }
 
+    private static void printUsageAndExit() {
+        System.out.println("Usage: java -cp bin SmithWatermanOffTarget.SmithWatermanOffTargetSearchAlign [options]");
+        System.out.println();
+        System.out.println("Required arguments:");
+        System.out.println("  --genome        Path to the genome reference FASTA file");
+        System.out.println("  --sgrnas        Path to a text file containing sgRNA sequences (with PAM)");
+        System.out.println("  --output        Output path prefix (CSV files will be created here)");
+        System.out.println("  --pam           PAM sequence (e.g. NGG)");
+        System.out.println("  --maxE          Max edit distance allowed (integer)");
+        System.out.println("  --maxM          Max mismatches allowed without bulges (integer)");
+        System.out.println("  --maxMB         Max mismatches allowed with bulges (integer)");
+        System.out.println("  --maxB          Max bulges allowed (integer)");
+        System.out.println();
+        System.out.println("Optional arguments:");
+        System.out.println("  --threads       Number of threads (default: 8)");
+        System.out.println("  --bestWindow    Choose best off-target in a window: true or false (default: false)");
+        System.out.println("  --windowSize    Window size for best-in-window (default: 50)");
+        System.out.println("  --allowPamEdits Allow edits in PAM region: true or false (default: false)");
+        System.out.println("  --dpWindowSize  Smith-Waterman DP window size (default: 10000).");
+        System.out.println("                  Larger values use more memory but usually reduce overhead.");
+        System.out.println("  --help          Print this help message");
+        System.out.println();
+        System.out.println("Example:");
+        System.out.println("  java -cp bin SmithWatermanOffTarget.SmithWatermanOffTargetSearchAlign \\");
+        System.out.println("    --genome hg38.fa --sgrnas sgRNAs.txt --output results \\");
+        System.out.println("    --pam NGG --maxE 6 --maxM 6 --maxMB 4 --maxB 1");
+        System.exit(0);
+    }
+
+
     public static void main(String[] args) {
-        // String[] args1 = {"genomes/hg38_only_chrs.fa", "sgRNAs.txt", "output_prefix", MaxEdits, MaxMismatchesWithoutBulges, MaxMismatchesWithBulges, MaxBulges, NUM_THREADS, chooseBestInWindow, best_in_window_size, PAM, ALLOW_PAM_EDITS};
-        // args = args1;
+        // Parse named arguments
+        Map<String, String> argMap = new HashMap<>();
+        for (int i = 0; i < args.length; i++) {
+            if (args[i].equals("--help")) {
+                printUsageAndExit();
+            }
+            if (args[i].startsWith("--") && i + 1 < args.length) {
+                argMap.put(args[i], args[i + 1]);
+                i++; // skip value
+            }
+        }
+
+        // Validate required arguments
+        String[] required = {"--genome", "--sgrnas", "--output", "--pam", "--maxE", "--maxM", "--maxMB", "--maxB"};
+        boolean missingArgs = false;
+        for (String req : required) {
+            if (!argMap.containsKey(req)) {
+                System.err.println("ERROR: Missing required argument: " + req);
+                missingArgs = true;
+            }
+        }
+        if (missingArgs) {
+            System.err.println("Run with --help for usage information.");
+            System.exit(1);
+        }
 
         // Start measuring execution time
-        // String PAM = "NGG";
         Instant start = Instant.now();
-        
-        // Some constants that should be provided as args
-        // This is an import factor as it define the memory the program consumes
-        // In addition, we are limited by the size of the array which function of this size
-        int bufferSize = 10000;
+
+        String fastaFilePath = argMap.get("--genome");
+        String filePath = argMap.get("--sgrnas");
+        String PAM = argMap.get("--pam");
         Boolean postprocessing = true;
-        String fastaFilePath = args[0];
-
-        String filePath = args[1];
         Boolean isFileInput = true;
+
+        // Set static variables
+        SmithWatermanOffTargetSearchAlign.setMaxEdits(Integer.parseInt(argMap.get("--maxE")));
+        SmithWatermanOffTargetSearchAlign.setMaxMismatchesWithoutBulges(Integer.parseInt(argMap.get("--maxM")));
+        SmithWatermanOffTargetSearchAlign.setMaxMismatchesWithBulges(Integer.parseInt(argMap.get("--maxMB")));
+        SmithWatermanOffTargetSearchAlign.setMaxBulges(Integer.parseInt(argMap.get("--maxB")));
+        SmithWatermanOffTargetSearchAlign.setNumThreads(Integer.parseInt(argMap.getOrDefault("--threads", "8")));
+        SmithWatermanOffTargetSearchAlign.setSiteWindowSize(Integer.parseInt(argMap.getOrDefault("--windowSize", "50")));
+        SmithWatermanOffTargetSearchAlign.setAllowPamEdits(argMap.getOrDefault("--allowPamEdits", "false").equals("true"));
+        Boolean chooseBestInWindow = argMap.getOrDefault("--bestWindow", "false").equals("true");
+        int bufferSize = Integer.parseInt(argMap.getOrDefault("--dpWindowSize", "10000"));
+
         
-        // Set the values of the static variables
-        SmithWatermanOffTargetSearchAlign.setMaxEdits(Integer.parseInt(args[3]));
-        SmithWatermanOffTargetSearchAlign.setMaxMismatchesWithoutBulges(Integer.parseInt(args[4]));
-        SmithWatermanOffTargetSearchAlign.setMaxMismatchesWithBulges(Integer.parseInt(args[5]));
-        SmithWatermanOffTargetSearchAlign.setMaxBulges(Integer.parseInt(args[6]));
-        SmithWatermanOffTargetSearchAlign.setNumThreads(Integer.parseInt(args[7]));
-        Boolean chooseBestInWindow = args[8].equals("true");
-        SmithWatermanOffTargetSearchAlign.setSiteWindowSize(Integer.parseInt(args[9]));
-        String PAM = args[10]; // "NGG";
-        SmithWatermanOffTargetSearchAlign.setAllowPamEdits(args[11].equals("true"));
-
-
         Map<String, String> strandToPam = new HashMap<>();
         strandToPam.put("+", PAM);
         strandToPam.put("-", reverseComplement(PAM));
@@ -665,10 +713,10 @@ public class SmithWatermanOffTargetSearchAlign {
                 // Define output file and write col names
                 FileWriter writer;
                 if (isFileInput){
-                    writer = new FileWriter(args[2] + "_" + target + ".csv");
+                    writer = new FileWriter(argMap.get("--output") + target + ".csv");
                 }
                 else{
-                    writer = new FileWriter(args[2] + ".csv");
+                    writer = new FileWriter(argMap.get("--output") + ".csv");
                 }
 
                 String[] cols;
