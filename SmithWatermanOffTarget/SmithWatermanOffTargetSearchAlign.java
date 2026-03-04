@@ -41,6 +41,7 @@ public class SmithWatermanOffTargetSearchAlign {
     private static int MAX_BULGES = 1;
     private static int EFFECTIVE_MAX_EDIT_WITH_BULGE = Math.min(MAX_EDITS, MAX_MISMATCHES_WITH_BULGES + MAX_BULGES);
     private static boolean ALLOW_PAM_EDITS = false;
+    private static boolean ALLOW_NS_IN_TEXT = false;
     // 4-bit masks: A=0001, C=0010, G=0100, T=1000
     private static final byte[] MASK = buildMask();
 
@@ -60,11 +61,18 @@ public class SmithWatermanOffTargetSearchAlign {
         m['D'] = 0b00001101;  // A|G|T (not C)
         m['H'] = 0b00001011;  // A|C|T (not G)
         m['V'] = 0b00000111;  // A|C|G (not T)
-        m['N'] = 0b00001111;  // any
+        m['N'] = (byte) (ALLOW_NS_IN_TEXT ? 0b00001111 : 0b00000000);
+        m['*'] = 0b00001111;  // target N replacement (matches everything)
         return m;
     }
 
     private static boolean iupacMatches(char iupac, char base) {
+        // bypass the bitmask logic to avoid memory access for the common case of an exact match or a simple mismatch
+        if (iupac == base) return true;
+        if (iupac == 'A' || iupac == 'C' || iupac == 'G' || iupac == 'T') {
+            // plain base mismatch - but check if text N is allowed
+            return ALLOW_NS_IN_TEXT && base == 'N';
+        }
         return (MASK[iupac] & MASK[base]) != 0;
     }
 
@@ -100,7 +108,7 @@ public class SmithWatermanOffTargetSearchAlign {
     }
 
     public static Alignment find_alignment(int[][] M, String pam, String strand,
-        Boolean allowNsInText, int trueDistance, String target, String text, int target_i, int text_i,
+        int trueDistance, String target, String text, int target_i, int text_i,
         StringBuilder[] targetTextAlign, int mismatches, int bulges) {
         int targetLen = target.length();
 
@@ -132,12 +140,7 @@ public class SmithWatermanOffTargetSearchAlign {
         targetTextAlignMissOrMatch[0].append(target.charAt(target_i - 1));
         targetTextAlignMissOrMatch[1].append(text.charAt(text_i - 1));
         int mismatchSocre;
-        if (allowNsInText) {
-            mismatchSocre = !iupacMatches(target.charAt(target_i - 1), text.charAt(text_i - 1)) ? 1 : 0;
-        }
-        else {
-            mismatchSocre = (text.charAt(text_i - 1) == 'N' || !iupacMatches(target.charAt(target_i - 1), text.charAt(text_i - 1))) ? 1 : 0;
-        }
+        mismatchSocre = !iupacMatches(target.charAt(target_i - 1), text.charAt(text_i - 1)) ? 1 : 0;
         if (!ALLOW_PAM_EDITS) {
             if  (((strand == "+") && (target_i <= targetLen &&  targetLen - pam.length() < target_i)) ||
                  ((strand == "-") && (target_i >= 1 &&  target_i <= pam.length()))) {
@@ -150,7 +153,7 @@ public class SmithWatermanOffTargetSearchAlign {
                         }
                         else {
                             targetTextMissOrMatchAlignment = find_alignment(M, pam, strand,
-                            allowNsInText, trueDistance, target, text, target_i - 1, text_i - 1,
+                            trueDistance, target, text, target_i - 1, text_i - 1,
                             targetTextAlignMissOrMatch, mismatches + mismatchSocre, bulges);
                         }
                         if (targetTextMissOrMatchAlignment != null &&
@@ -163,7 +166,7 @@ public class SmithWatermanOffTargetSearchAlign {
                         targetTextAlignTextBugle[0].append('-');
                         targetTextAlignTextBugle[1].append(text.charAt(text_i - 1));
                         Alignment targetTextnTextBugleAlignment = find_alignment(M, pam, strand,
-                            allowNsInText, trueDistance, target, text, target_i, text_i - 1,
+                            trueDistance, target, text, target_i, text_i - 1,
                             targetTextAlignTextBugle, mismatches, bulges + 1);
                         if (targetTextnTextBugleAlignment != null &&
                             ((targetTextnTextBugleAlignment.getBulges() + targetTextnTextBugleAlignment.getMismatches()) == trueDistance)) {
@@ -185,12 +188,12 @@ public class SmithWatermanOffTargetSearchAlign {
                         return null;
                     }
                     return find_alignment(M, pam, strand,
-                        allowNsInText, trueDistance, target, text, target_i - 1, text_i - 1,
+                        trueDistance, target, text, target_i - 1, text_i - 1,
                         targetTextAlignMissOrMatch, mismatches + mismatchSocre, bulges);
                  }
         }
         Alignment targetTextMissOrMatchAlignment = find_alignment(M, pam, strand,
-            allowNsInText, trueDistance, target, text, target_i - 1, text_i - 1, targetTextAlignMissOrMatch, mismatches + mismatchSocre, bulges);
+            trueDistance, target, text, target_i - 1, text_i - 1, targetTextAlignMissOrMatch, mismatches + mismatchSocre, bulges);
         if (targetTextMissOrMatchAlignment != null &&
             ((targetTextMissOrMatchAlignment.getBulges() + targetTextMissOrMatchAlignment.getMismatches()) == trueDistance)) {
             return targetTextMissOrMatchAlignment;
@@ -203,7 +206,7 @@ public class SmithWatermanOffTargetSearchAlign {
         targetTextAlignTargetBugle[0].append(target.charAt(target_i - 1));
         targetTextAlignTargetBugle[1].append('-');
         Alignment targetTextTargetBugleAlignment = find_alignment(M, pam, strand,
-            allowNsInText, trueDistance, target, text, target_i - 1, text_i, targetTextAlignTargetBugle, mismatches, bulges + 1);
+            trueDistance, target, text, target_i - 1, text_i, targetTextAlignTargetBugle, mismatches, bulges + 1);
         if (targetTextTargetBugleAlignment != null &&
             ((targetTextTargetBugleAlignment.getBulges() + targetTextTargetBugleAlignment.getMismatches()) == trueDistance)) {
             return targetTextTargetBugleAlignment;
@@ -220,7 +223,7 @@ public class SmithWatermanOffTargetSearchAlign {
             targetTextAlignTextBugle[0].append('-');
             targetTextAlignTextBugle[1].append(text.charAt(text_i - 1));
             targetTextnTextBugleAlignment = find_alignment(M, pam, strand,
-                allowNsInText, trueDistance, target, text, target_i, text_i - 1, targetTextAlignTextBugle, mismatches, bulges + 1);
+                trueDistance, target, text, target_i, text_i - 1, targetTextAlignTextBugle, mismatches, bulges + 1);
         }
         if (targetTextnTextBugleAlignment != null &&
             ((targetTextnTextBugleAlignment.getBulges() + targetTextnTextBugleAlignment.getMismatches()) == trueDistance)) {
@@ -247,30 +250,20 @@ public class SmithWatermanOffTargetSearchAlign {
     }
     
     private static void smithWatermanLastCellLogic(
-        int[][] M, String target,String text, int row, int col, Boolean allowNsInText) {
+        int[][] M, String target,String text, int row, int col) {
         int matchCell = M[row - 1][col - 1];
         int targetBulgeCell = M[row - 1][col];
         int textBulgeCell = M[row][col - 1];
-        if (allowNsInText) {
-            M[row][col] = Math.min(Math.min(
-                !iupacMatches(target.charAt(row - 1), text.charAt(col - 1)) ? matchCell + 1 : matchCell,
-                targetBulgeCell + 1), textBulgeCell + 1
-                );
-        }
-        else {
-            M[row][col] = Math.min(Math.min(
-                (text.charAt(col - 1) == 'N' ||
-                !iupacMatches(target.charAt(row - 1), text.charAt(col - 1))) ? matchCell + 1 : matchCell,
-                targetBulgeCell + 1), textBulgeCell + 1
-                );
-        }
+        M[row][col] = Math.min(Math.min(
+            !iupacMatches(target.charAt(row - 1), text.charAt(col - 1)) ? matchCell + 1 : matchCell,
+            targetBulgeCell + 1), textBulgeCell + 1);
     }
 
-    private static void smithWatermanRowsFill(int[][] M, int m, int n,  String target, String text, Boolean allowNsInText) {
+    private static void smithWatermanRowsFill(int[][] M, int m, int n,  String target, String text) {
         // fill the rows except to the last row
         for (int row = 1; row <= m - 1; row++) {
             for (int col = 1; col <= n; col++) {
-                smithWatermanLastCellLogic(M, target,text, row, col, allowNsInText);
+                smithWatermanLastCellLogic(M, target,text, row, col);
             }
         }
     }
@@ -296,12 +289,12 @@ public class SmithWatermanOffTargetSearchAlign {
     }
     
     private static Alignment smithWatermanPostprocessing(
-        int[][] M, int m, String strand, String target, String pam, String text, Boolean allowNsInText, Boolean chooseBestInWindow,
+        int[][] M, int m, String strand, String target, String pam, String text, Boolean chooseBestInWindow,
         List<Alignment> alignmentList, List<Integer> endPosList, List<Integer> editNumList,
         int col, StringBuilder[] targetTextEmptyAlign, Alignment targetTextAlignment, int targetTextAlignmentPos,
         int targetTextAlignmentEdit) {
         Alignment targetTextAlignmentTemp = find_alignment(M, pam, strand,
-            allowNsInText, M[m][col], target, text, m, col, targetTextEmptyAlign, 0, 0);
+            M[m][col], target, text, m, col, targetTextEmptyAlign, 0, 0);
         if (targetTextAlignmentTemp != null) {
             if (targetTextAlignment == null) {
                 return targetTextAlignmentTemp;
@@ -329,7 +322,7 @@ public class SmithWatermanOffTargetSearchAlign {
 
     private static void smithWatermanLastRowFill(
         int[][] M, int m, int n,  String strand, String target, String pam, String text, int maxEdits,
-        int offsetSize, Boolean allowNsInText, Boolean postprocessing, Boolean chooseBestInWindow,
+        int offsetSize, Boolean postprocessing, Boolean chooseBestInWindow,
         List<Alignment> alignmentList, List<Integer> endPosList, List<Integer> editNumList) {
         
         Alignment targetTextAlignment = null;
@@ -346,10 +339,10 @@ public class SmithWatermanOffTargetSearchAlign {
 
         if (postprocessing) {
             for (int col = 1; col <= n; col++) {
-                smithWatermanLastCellLogic(M, target,text, m, col, allowNsInText);
+                smithWatermanLastCellLogic(M, target,text, m, col);
                 if ((M[m][col] <= maxEdits) && (col >= offsetSize + 1)) {
                     Alignment targetTextAlignmentTemp = smithWatermanPostprocessing(
-                        M, m, strand, target, pam, text, allowNsInText, chooseBestInWindow, alignmentList, endPosList, editNumList,
+                        M, m, strand, target, pam, text, chooseBestInWindow, alignmentList, endPosList, editNumList,
                         col, targetTextEmptyAlign, targetTextAlignment, targetTextAlignmentPos, targetTextAlignmentEdit);
                     if (targetTextAlignmentTemp != null) {
                         // update the alignment with the next possible alignment
@@ -368,7 +361,7 @@ public class SmithWatermanOffTargetSearchAlign {
         }
         else {
             for (int col = 1; col <= n; col++) {
-                smithWatermanLastCellLogic(M, target,text, m, col, allowNsInText);
+                smithWatermanLastCellLogic(M, target,text, m, col);
                 if ((M[m][col] <= maxEdits) && (col >= offsetSize + 1)) {
                     endPosList.add(col);
                     editNumList.add(M[m][col]);
@@ -379,7 +372,7 @@ public class SmithWatermanOffTargetSearchAlign {
     
     public static OffTargetData smithWaterman(
         String strand, String target, String pam, String text, int maxEdits,
-        int offsetSize, Boolean allowNsInText, Boolean postprocessing, Boolean chooseBestInWindow) {
+        int offsetSize, Boolean postprocessing, Boolean chooseBestInWindow) {
         int m = target.length();
         int n = text.length();
         int[][] M = new int[m + 1][n + 1];
@@ -388,7 +381,7 @@ public class SmithWatermanOffTargetSearchAlign {
         for (int row = 1; row <= m; row++) {
             M[row][0] = row;
         }
-        smithWatermanRowsFill(M, m, n,  target, text, allowNsInText);
+        smithWatermanRowsFill(M, m, n,  target, text);
 
         // while filling the last row, we will create the off-target list with the unique end positions
         List<Integer> endPosList = new ArrayList<Integer>();
@@ -400,7 +393,7 @@ public class SmithWatermanOffTargetSearchAlign {
         }
         
         smithWatermanLastRowFill(M, m, n, strand, target, pam, text, maxEdits, offsetSize,
-           allowNsInText, postprocessing, chooseBestInWindow, alignmentList, endPosList, editNumList);
+           postprocessing, chooseBestInWindow, alignmentList, endPosList, editNumList);
 
         
         // convert the lists into arrays
@@ -436,6 +429,7 @@ public class SmithWatermanOffTargetSearchAlign {
             case 'T': return 'A';
             case 'N': return 'N';
             case '-': return '-';
+            case '*': return '*';
             case 'R': return 'Y';
             case 'Y': return 'R';
             case 'S': return 'S';
@@ -473,7 +467,6 @@ public class SmithWatermanOffTargetSearchAlign {
         private int targetLen;
         private Map<String, String> strandToTarget;
         private Map<String, String> strandToPam;
-        private Boolean allowNsInText;
         private Boolean postprocessing;
         private Boolean chooseBestInWindow;
         private long positionShift;
@@ -481,14 +474,13 @@ public class SmithWatermanOffTargetSearchAlign {
         
         public SmithWatermanProcessFileHandler(
             FileWriter writer, String text, String lastText, int targetLen, Map<String, String> strandToTarget, Map<String, String> strandToPam,
-            Boolean allowNsInText, Boolean postprocessing, Boolean chooseBestInWindow, long positionShift, String chr) {
+            Boolean postprocessing, Boolean chooseBestInWindow, long positionShift, String chr) {
             this.writer = writer;
             this.text = text;
             this.lastText = lastText;
             this.targetLen = targetLen;
             this.strandToTarget = strandToTarget;
             this.strandToPam = strandToPam;
-            this.allowNsInText = allowNsInText;
             this.postprocessing = postprocessing;
             this.chooseBestInWindow = chooseBestInWindow;
             this.positionShift = positionShift;
@@ -505,7 +497,7 @@ public class SmithWatermanOffTargetSearchAlign {
 
             for (String strand : strandToTarget.keySet()) {
                 OffTargetData offTargetData = smithWaterman(
-                    strand, strandToTarget.get(strand), strandToPam.get(strand), text, MAX_EDITS, offsetSize, allowNsInText, postprocessing, chooseBestInWindow);
+                    strand, strandToTarget.get(strand), strandToPam.get(strand), text, MAX_EDITS, offsetSize, postprocessing, chooseBestInWindow);
                 // write to csv
                 int size = offTargetData.getSize();
                 synchronized(writer){
@@ -526,7 +518,7 @@ public class SmithWatermanOffTargetSearchAlign {
                             writer.append(",");
                             // write aligned target
                             Alignment alignment = offTargetData.getAlignmentArr()[i];
-                            writer.append(alignment.getAlignedTarget());
+                            writer.append(alignment.getAlignedTarget().replace('*', 'N'));
                             writer.append(",");
                             // write aligned text
                             writer.append(alignment.getAlignedText().replace("\n", "").replace("\r", ""));
@@ -553,7 +545,7 @@ public class SmithWatermanOffTargetSearchAlign {
     public static void smithWatermanProcessFile(
             File file, Map<String, String> strandToTarget, Map<String, String> strandToPam,
             FileWriter writer, int bufferSize, int targetLen,
-            Boolean allowNsInText, Boolean postprocessing, Boolean chooseBestInWindow) throws IOException{
+            Boolean postprocessing, Boolean chooseBestInWindow) throws IOException{
         Path filePath = Path.of(file.getAbsolutePath());
         // Get the chr name
         String chr = file.getName();
@@ -572,7 +564,7 @@ public class SmithWatermanOffTargetSearchAlign {
             }
             String text = new String(buffer, 0, numRead);
             SmithWatermanProcessFileHandler handler = new SmithWatermanProcessFileHandler(
-                writer, text, lastText, targetLen, strandToTarget, strandToPam, allowNsInText,
+                writer, text, lastText, targetLen, strandToTarget, strandToPam,
                 postprocessing, chooseBestInWindow, positionShift, chr);
             Future<?> future = executorService.submit(handler);
             futures.add(future);
@@ -604,7 +596,6 @@ public class SmithWatermanOffTargetSearchAlign {
         Instant start = Instant.now();
         
         // Some constants that should be provided as args
-        Boolean allowNsInText = false;
         Boolean postprocessing = true;
         String fastaFilePath = args[0];
 
@@ -642,14 +633,16 @@ public class SmithWatermanOffTargetSearchAlign {
         try (BufferedReader reader = new BufferedReader(new FileReader(filePath))) {
             String target;
             while ((target = reader.readLine()) != null) {
-                String rcTarget = reverseComplement(target);
                 // This is import factor as it define the memory the program consumes
                 // In addition, we are limited by the size of the array which function of this size
-                int bufferSize = 100000;
+                int bufferSize = 10000;
 
+                String dpTarget = ALLOW_NS_IN_TEXT ? target : target.replace('N', '*');
+                String rcTarget = reverseComplement(dpTarget);
                 Map<String, String> strandToTarget = new HashMap<>();
-                strandToTarget.put("+", target);
+                strandToTarget.put("+", dpTarget);
                 strandToTarget.put("-", rcTarget);
+
                 int targetLen = target.length();
                 // Split genome to chrs files (if not already done)
                 FastaReader.splitFastaToFiles(fastaFilePath);
@@ -684,7 +677,7 @@ public class SmithWatermanOffTargetSearchAlign {
                 for (int file_i=0 ; file_i < files.length; file_i++) {
                     smithWatermanProcessFile(
                         files[file_i], strandToTarget, strandToPam, writer, bufferSize, targetLen,
-                        allowNsInText, postprocessing, chooseBestInWindow);
+                        postprocessing, chooseBestInWindow);
                 }
                 // Close writer
                 writer.close();
