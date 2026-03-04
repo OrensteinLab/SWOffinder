@@ -586,6 +586,15 @@ public class SmithWatermanOffTargetSearchAlign {
             in.close();
             executorService.shutdown();
     }
+    
+    private static boolean targetContainsPam(String target, String pam) {
+        if (target.length() < pam.length()) return false;
+        int offset = target.length() - pam.length();
+        for (int i = 0; i < pam.length(); i++) {
+            if (!iupacMatches(pam.charAt(i), target.charAt(offset + i))) return false;
+        }
+        return true;
+    }
 
     public static void main(String[] args) {
         // String[] args1 = {"genomes/hg38_only_chrs.fa", "sgRNAs.txt", "output_prefix", MaxEdits, MaxMismatchesWithoutBulges, MaxMismatchesWithBulges, MaxBulges, NUM_THREADS, chooseBestInWindow, best_in_window_size, PAM, ALLOW_PAM_EDITS};
@@ -596,6 +605,9 @@ public class SmithWatermanOffTargetSearchAlign {
         Instant start = Instant.now();
         
         // Some constants that should be provided as args
+        // This is an import factor as it define the memory the program consumes
+        // In addition, we are limited by the size of the array which function of this size
+        int bufferSize = 10000;
         Boolean postprocessing = true;
         String fastaFilePath = args[0];
 
@@ -633,10 +645,12 @@ public class SmithWatermanOffTargetSearchAlign {
         try (BufferedReader reader = new BufferedReader(new FileReader(filePath))) {
             String target;
             while ((target = reader.readLine()) != null) {
-                // This is import factor as it define the memory the program consumes
-                // In addition, we are limited by the size of the array which function of this size
-                int bufferSize = 10000;
-
+                // Validate PAM presence
+                if (!targetContainsPam(target, PAM)) {
+                    System.err.println("WARNING: Target '" + target + 
+                                        "' does not end with PAM '" + PAM + "'. " +
+                                        "Make sure your sgRNA sequences include the PAM region.");
+                }
                 String dpTarget = ALLOW_NS_IN_TEXT ? target : target.replace('N', '*');
                 String rcTarget = reverseComplement(dpTarget);
                 Map<String, String> strandToTarget = new HashMap<>();
