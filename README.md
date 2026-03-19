@@ -45,7 +45,7 @@ java -cp bin SmithWatermanOffTarget.SmithWatermanOffTargetSearchAlign --help
 | `--threads` | `8` | Number of threads to use |
 | `--bestWindow` | `false` | If `true`, only the best off-target site within a window is reported |
 | `--windowSize` | `50` | Window size used when `--bestWindow` is `true` |
-| `--allowPamEdits` | `false` | If `true`, mismatches in the PAM region are allowed |
+| `--allowPamEdits` | `false` | If `true`, edits in the PAM region are allowed |
 | `--dpWindowSize` | `10000` | Smith-Waterman DP chunk size in base pairs (see performance tips below) |
 
 ### Example
