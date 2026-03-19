@@ -107,7 +107,7 @@ public class SmithWatermanOffTargetSearchAlign {
         ALLOW_PAM_EDITS = value;
     }
 
-    public static Alignment find_alignment(int[][] M, String pam, String strand,
+    public static Alignment find_alignment(int[][] M, String pam, char strand,
         int trueDistance, String target, String text, int target_i, int text_i,
         StringBuilder[] targetTextAlign, int mismatches, int bulges) {
         int targetLen = target.length();
@@ -123,7 +123,9 @@ public class SmithWatermanOffTargetSearchAlign {
             return null;
         }
         if (target_i == 0) {
-                return new Alignment(mismatches, bulges, targetTextAlign[0], targetTextAlign[1]);
+                StringBuilder finalTargetAlign = new StringBuilder(targetTextAlign[0]);
+                StringBuilder finalTextAlign = new StringBuilder(targetTextAlign[1]);
+                return new Alignment(mismatches, bulges, finalTargetAlign, finalTextAlign);
         }
         if (text_i <= 0) {
             return null;
@@ -132,42 +134,51 @@ public class SmithWatermanOffTargetSearchAlign {
         if (M[target_i][text_i] > (effective_max_edit - mismatches - bulges)) {
             return null;
         }
+    
+        // store the current length of the alignment strings to backtrack after recursive calls
+        int len0 = targetTextAlign[0].length();
+        int len1 = targetTextAlign[1].length();
 
         // mismatch
-        StringBuilder[] targetTextAlignMissOrMatch = new StringBuilder[2];
-        targetTextAlignMissOrMatch[0] = new StringBuilder(targetTextAlign[0].toString());
-        targetTextAlignMissOrMatch[1] = new StringBuilder(targetTextAlign[1].toString());
-        targetTextAlignMissOrMatch[0].append(target.charAt(target_i - 1));
-        targetTextAlignMissOrMatch[1].append(text.charAt(text_i - 1));
         int mismatchSocre;
         mismatchSocre = !iupacMatches(target.charAt(target_i - 1), text.charAt(text_i - 1)) ? 1 : 0;
         if (!ALLOW_PAM_EDITS) {
-            if  (((strand == "+") && (target_i <= targetLen &&  targetLen - pam.length() < target_i)) ||
-                 ((strand == "-") && (target_i >= 1 &&  target_i <= pam.length()))) {
-                    // TODO: shorten this
-                    if (strand == "-" && target_i == pam.length()){
-                        // This is a special case as we might have "-" before the PAM
+            // if we are not allowing PAM edits, then we should not allow mismatches or bulges in the PAM region
+            if  (((strand == '+') && (target_i <= targetLen &&  targetLen - pam.length() < target_i)) ||
+                 ((strand == '-') && (target_i >= 1 &&  target_i <= pam.length()))) {
+                    // if we are in the PAM region, we should not allow mismatches or bulges
+                    if (strand == '-' && target_i == pam.length()){
+                        // Special case for the negative strand at the boundary immediately upstream of the PAM.
+                        // When PAM edits are disallowed, we still need to consider a text bulge placed just before
+                        // the PAM, rather than forcing the recursion to step directly into the PAM region.
+                        // Therefore, at target_i == pam.length(), compare:
+                        //   1. a diagonal step into the PAM boundary (only if it is a PAM match), and
+                        //   2. a text bulge before the PAM.
+                        // Return the better valid alignment.
                         Alignment targetTextMissOrMatchAlignment;
                         if (mismatchSocre != 0) {
                             targetTextMissOrMatchAlignment = null;
                         }
                         else {
+                            targetTextAlign[0].append(target.charAt(target_i - 1));
+                            targetTextAlign[1].append(text.charAt(text_i - 1));
                             targetTextMissOrMatchAlignment = find_alignment(M, pam, strand,
-                            trueDistance, target, text, target_i - 1, text_i - 1,
-                            targetTextAlignMissOrMatch, mismatches + mismatchSocre, bulges);
+                                trueDistance, target, text, target_i - 1, text_i - 1,
+                                targetTextAlign, mismatches + mismatchSocre, bulges);
+                            targetTextAlign[0].setLength(len0);
+                            targetTextAlign[1].setLength(len1);
                         }
                         if (targetTextMissOrMatchAlignment != null &&
                             ((targetTextMissOrMatchAlignment.getBulges() + targetTextMissOrMatchAlignment.getMismatches()) == trueDistance)) {
                                 return targetTextMissOrMatchAlignment;
                             }
-                        StringBuilder[] targetTextAlignTextBugle = new StringBuilder[2];
-                        targetTextAlignTextBugle[0] = new StringBuilder(targetTextAlign[0].toString());
-                        targetTextAlignTextBugle[1] = new StringBuilder(targetTextAlign[1].toString());
-                        targetTextAlignTextBugle[0].append('-');
-                        targetTextAlignTextBugle[1].append(text.charAt(text_i - 1));
+                        targetTextAlign[0].append('-');
+                        targetTextAlign[1].append(text.charAt(text_i - 1));
                         Alignment targetTextnTextBugleAlignment = find_alignment(M, pam, strand,
                             trueDistance, target, text, target_i, text_i - 1,
-                            targetTextAlignTextBugle, mismatches, bulges + 1);
+                            targetTextAlign, mismatches, bulges + 1);
+                        targetTextAlign[0].setLength(len0);
+                        targetTextAlign[1].setLength(len1);
                         if (targetTextnTextBugleAlignment != null &&
                             ((targetTextnTextBugleAlignment.getBulges() + targetTextnTextBugleAlignment.getMismatches()) == trueDistance)) {
                             return targetTextnTextBugleAlignment;
@@ -183,30 +194,37 @@ public class SmithWatermanOffTargetSearchAlign {
                         }
                         return targetTextnTextBugleAlignment;
                     }
-                    
                     if (mismatchSocre != 0) {
                         return null;
                     }
-                    return find_alignment(M, pam, strand,
+                    targetTextAlign[0].append(target.charAt(target_i - 1));
+                    targetTextAlign[1].append(text.charAt(text_i - 1));
+                    Alignment resAlignment = find_alignment(M, pam, strand,
                         trueDistance, target, text, target_i - 1, text_i - 1,
-                        targetTextAlignMissOrMatch, mismatches + mismatchSocre, bulges);
-                 }
+                        targetTextAlign, mismatches + mismatchSocre, bulges);
+                    targetTextAlign[0].setLength(len0);
+                    targetTextAlign[1].setLength(len1);
+                    return resAlignment;
+            }
         }
+        targetTextAlign[0].append(target.charAt(target_i - 1));
+        targetTextAlign[1].append(text.charAt(text_i - 1));
         Alignment targetTextMissOrMatchAlignment = find_alignment(M, pam, strand,
-            trueDistance, target, text, target_i - 1, text_i - 1, targetTextAlignMissOrMatch, mismatches + mismatchSocre, bulges);
-        if (targetTextMissOrMatchAlignment != null &&
+            trueDistance, target, text, target_i - 1, text_i - 1, targetTextAlign, mismatches + mismatchSocre, bulges);
+        targetTextAlign[0].setLength(len0);
+        targetTextAlign[1].setLength(len1);
+            if (targetTextMissOrMatchAlignment != null &&
             ((targetTextMissOrMatchAlignment.getBulges() + targetTextMissOrMatchAlignment.getMismatches()) == trueDistance)) {
             return targetTextMissOrMatchAlignment;
         }
 
         // target bulge
-        StringBuilder[] targetTextAlignTargetBugle = new StringBuilder[2];
-        targetTextAlignTargetBugle[0] = new StringBuilder(targetTextAlign[0].toString());
-        targetTextAlignTargetBugle[1] = new StringBuilder(targetTextAlign[1].toString());
-        targetTextAlignTargetBugle[0].append(target.charAt(target_i - 1));
-        targetTextAlignTargetBugle[1].append('-');
+        targetTextAlign[0].append(target.charAt(target_i - 1));
+        targetTextAlign[1].append('-');
         Alignment targetTextTargetBugleAlignment = find_alignment(M, pam, strand,
-            trueDistance, target, text, target_i - 1, text_i, targetTextAlignTargetBugle, mismatches, bulges + 1);
+            trueDistance, target, text, target_i - 1, text_i, targetTextAlign, mismatches, bulges + 1);
+        targetTextAlign[0].setLength(len0);
+        targetTextAlign[1].setLength(len1);
         if (targetTextTargetBugleAlignment != null &&
             ((targetTextTargetBugleAlignment.getBulges() + targetTextTargetBugleAlignment.getMismatches()) == trueDistance)) {
             return targetTextTargetBugleAlignment;
@@ -217,13 +235,12 @@ public class SmithWatermanOffTargetSearchAlign {
         if (target_i != targetLen) {
             // we do to have text bulge in the begining/start of the alignment
             // note that it impossible to put text bulge when target_i == 0
-            StringBuilder[] targetTextAlignTextBugle = new StringBuilder[2];
-            targetTextAlignTextBugle[0] = new StringBuilder(targetTextAlign[0].toString());
-            targetTextAlignTextBugle[1] = new StringBuilder(targetTextAlign[1].toString());
-            targetTextAlignTextBugle[0].append('-');
-            targetTextAlignTextBugle[1].append(text.charAt(text_i - 1));
+            targetTextAlign[0].append('-');
+            targetTextAlign[1].append(text.charAt(text_i - 1));
             targetTextnTextBugleAlignment = find_alignment(M, pam, strand,
-                trueDistance, target, text, target_i, text_i - 1, targetTextAlignTextBugle, mismatches, bulges + 1);
+                trueDistance, target, text, target_i, text_i - 1, targetTextAlign, mismatches, bulges + 1);
+            targetTextAlign[0].setLength(len0);
+            targetTextAlign[1].setLength(len1);
         }
         if (targetTextnTextBugleAlignment != null &&
             ((targetTextnTextBugleAlignment.getBulges() + targetTextnTextBugleAlignment.getMismatches()) == trueDistance)) {
@@ -269,9 +286,9 @@ public class SmithWatermanOffTargetSearchAlign {
     }
 
     private static void smithWatermanProcessAlignment(
-        Alignment targetTextAlignment, int targetTextAlignmentPos, int targetTextAlignmentEdit, String strand,
+        Alignment targetTextAlignment, int targetTextAlignmentPos, int targetTextAlignmentEdit, char strand,
         List<Alignment> alignmentList, List<Integer> endPosList, List<Integer> editNumList) {
-        if (strand == "+") {
+        if (strand == '+') {
             targetTextAlignment.setAlignedTarget(targetTextAlignment.getAlignedTargetBuilder().reverse().toString());
             targetTextAlignment.setAlignedTargetBulider(null);
             targetTextAlignment.setAlignedText(targetTextAlignment.getAlignedTextBuilder().reverse().toString());
@@ -289,7 +306,7 @@ public class SmithWatermanOffTargetSearchAlign {
     }
     
     private static Alignment smithWatermanPostprocessing(
-        int[][] M, int m, String strand, String target, String pam, String text, Boolean chooseBestInWindow,
+        int[][] M, int m, char strand, String target, String pam, String text, Boolean chooseBestInWindow,
         List<Alignment> alignmentList, List<Integer> endPosList, List<Integer> editNumList,
         int col, StringBuilder[] targetTextEmptyAlign, Alignment targetTextAlignment, int targetTextAlignmentPos,
         int targetTextAlignmentEdit) {
@@ -321,7 +338,7 @@ public class SmithWatermanOffTargetSearchAlign {
     }
 
     private static void smithWatermanLastRowFill(
-        int[][] M, int m, int n,  String strand, String target, String pam, String text, int maxEdits,
+        int[][] M, int m, int n,  char strand, String target, String pam, String text, int maxEdits,
         int offsetSize, Boolean postprocessing, Boolean chooseBestInWindow,
         List<Alignment> alignmentList, List<Integer> endPosList, List<Integer> editNumList) {
         
@@ -371,7 +388,7 @@ public class SmithWatermanOffTargetSearchAlign {
     }
     
     public static OffTargetData smithWaterman(
-        String strand, String target, String pam, String text, int maxEdits,
+        char strand, String target, String pam, String text, int maxEdits,
         int offsetSize, Boolean postprocessing, Boolean chooseBestInWindow) {
         int m = target.length();
         int n = text.length();
@@ -465,15 +482,15 @@ public class SmithWatermanOffTargetSearchAlign {
         private String text;
         private String lastText;
         private int targetLen;
-        private Map<String, String> strandToTarget;
-        private Map<String, String> strandToPam;
+        private Map<Character, String> strandToTarget;
+        private Map<Character, String> strandToPam;
         private Boolean postprocessing;
         private Boolean chooseBestInWindow;
         private long positionShift;
         private String chr;
         
         public SmithWatermanProcessFileHandler(
-            FileWriter writer, String text, String lastText, int targetLen, Map<String, String> strandToTarget, Map<String, String> strandToPam,
+            FileWriter writer, String text, String lastText, int targetLen, Map<Character, String> strandToTarget, Map<Character, String> strandToPam,
             Boolean postprocessing, Boolean chooseBestInWindow, long positionShift, String chr) {
             this.writer = writer;
             this.text = text;
@@ -495,7 +512,7 @@ public class SmithWatermanOffTargetSearchAlign {
                 text = lastText.substring(lastText.length() - offsetSize) + text;
             }
 
-            for (String strand : strandToTarget.keySet()) {
+            for (Character strand : strandToTarget.keySet()) {
                 OffTargetData offTargetData = smithWaterman(
                     strand, strandToTarget.get(strand), strandToPam.get(strand), text, MAX_EDITS, offsetSize, postprocessing, chooseBestInWindow);
                 // write to csv
@@ -543,7 +560,7 @@ public class SmithWatermanOffTargetSearchAlign {
     
 
     public static void smithWatermanProcessFile(
-            File file, Map<String, String> strandToTarget, Map<String, String> strandToPam,
+            File file, Map<Character, String> strandToTarget, Map<Character, String> strandToPam,
             FileWriter writer, int bufferSize, int targetLen,
             Boolean postprocessing, Boolean chooseBestInWindow) throws IOException{
         Path filePath = Path.of(file.getAbsolutePath());
@@ -674,9 +691,9 @@ public class SmithWatermanOffTargetSearchAlign {
         int bufferSize = Integer.parseInt(argMap.getOrDefault("--dpWindowSize", "10000"));
 
         
-        Map<String, String> strandToPam = new HashMap<>();
-        strandToPam.put("+", PAM);
-        strandToPam.put("-", reverseComplement(PAM));
+        Map<Character, String> strandToPam = new HashMap<>();
+        strandToPam.put('+', PAM);
+        strandToPam.put('-', reverseComplement(PAM));
 
         try {
             if (filePath.indexOf('.') == -1){
@@ -701,9 +718,9 @@ public class SmithWatermanOffTargetSearchAlign {
                 }
                 String dpTarget = ALLOW_NS_IN_TEXT ? target : target.replace('N', '*');
                 String rcTarget = reverseComplement(dpTarget);
-                Map<String, String> strandToTarget = new HashMap<>();
-                strandToTarget.put("+", dpTarget);
-                strandToTarget.put("-", rcTarget);
+                Map<Character, String> strandToTarget = new HashMap<>();
+                strandToTarget.put('+', dpTarget);
+                strandToTarget.put('-', rcTarget);
 
                 int targetLen = target.length();
                 // Split genome to chrs files (if not already done)
