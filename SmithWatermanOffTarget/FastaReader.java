@@ -72,7 +72,7 @@ public class FastaReader {
         FileWriter writer = new FileWriter(filename);
         
         // Write the sequence to the file
-        writer.write(sequence + "\n");
+        writer.write(sequence);
         
         // Close the file
         writer.close();
